@@ -96,6 +96,29 @@ impl TextEdit {
         builder.finish()
     }
 
+    pub fn from_diff(builder: &mut TextEditBuilder, old: &str, new: &str) {
+        let diff = TextDiff::configure()
+            .newline_terminated(true)
+            .diff_unicode_words(old, new);
+
+        let remapper = TextDiffRemapper::from_text_diff(&diff, old, new);
+
+        for (tag, text) in diff.ops().iter().flat_map(|op| remapper.iter_slices(op)) {
+            dbg!(tag, text);
+            match tag {
+                ChangeTag::Equal => {
+                    builder.equal(text);
+                }
+                ChangeTag::Delete => {
+                    builder.delete(text);
+                }
+                ChangeTag::Insert => {
+                    builder.insert(text);
+                }
+            }
+        }
+    }
+
     /// Returns the number of [DiffOp] in this [TextEdit]
     pub fn len(&self) -> usize {
         self.ops.len()
@@ -302,6 +325,12 @@ mod tests {
     use std::num::NonZeroU32;
 
     use crate::{compress_equal_op, TextEdit};
+
+    #[test]
+    fn smoke() {
+        let mut builder = TextEdit::builder();
+        builder.equal("line 1");
+    }
 
     #[test]
     fn compress_short() {

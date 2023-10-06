@@ -2,7 +2,7 @@ use crate::{
     chain_trivia_pieces, AstNode, Language, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxSlot,
     SyntaxToken,
 };
-use biome_text_edit::TextEdit;
+use biome_text_edit::{TextEdit, TextEditBuilder};
 use biome_text_size::TextRange;
 use std::{
     cmp,
@@ -43,6 +43,7 @@ struct CommitChange<L: Language> {
     parent_range: Option<(u32, u32)>,
     new_node_slot: usize,
     new_node: Option<SyntaxElement<L>>,
+    is_main: bool,
 }
 
 impl<L: Language> CommitChange<L> {
@@ -91,6 +92,7 @@ where
 {
     root: SyntaxNode<L>,
     changes: BinaryHeap<CommitChange<L>>,
+    text_edit_builder: TextEditBuilder,
 }
 
 impl<L> BatchMutation<L>
@@ -101,6 +103,7 @@ where
         Self {
             root,
             changes: BinaryHeap::new(),
+            text_edit_builder: TextEdit::builder()  ,
         }
     }
 
@@ -298,6 +301,7 @@ where
             parent_range,
             new_node_slot,
             new_node: next_element,
+            is_main: true,
         });
     }
 
@@ -325,36 +329,44 @@ where
 
         let text_range = range?;
 
-        let old = self.root.to_string();
-        let new = self.clone().commit().to_string();
-        let text_edit = TextEdit::from_unicode_words(&old, &new);
+        // let old = self.root.covering_element(text_range).to_string();
+        // let (new, new_range) = self.clone().commit_with_range();
+        // let new = new.covering_element(new_range).to_string();
 
+
+        // let old = &self.root.to_string()[text_range];
+        // let (new, new_range) = self.clone().commit_with_range();
+        // let new = &new.to_string()[new_range];
+
+
+        let old = self.root.to_string();
+        let (root, text_range, text_edit) = self.clone().commit_with_range();
+
+        // dbg!(&old, &new);
+
+        let text_edit = TextEdit::from_unicode_words(&old, &root.to_string());
+        // let text_edit = self.text_edit_builder.clone().finish();
+
+        dbg!(text_edit.clone());
         Some((text_range, text_edit))
+        // None
     }
 
-    /// The core of the batch mutation algorithm can be summarized as:
-    /// 1 - Iterate all requested changes;
-    /// 2 - Insert them into a heap (priority queue) by depth. Deeper changes are done first;
-    /// 3 - Loop popping requested changes from the heap, taking the deepest change we have for the moment;
-    /// 4 - Each requested change has a "parent", an "index" and the "new node" (or None);
-    /// 5 - Clone the current parent's "parent", the "grandparent";
-    /// 6 - Detach the current "parent" from the tree;
-    /// 7 - Replace the old node at "index" at the current "parent" with the current "new node";
-    /// 8 - Insert into the heap the grandparent as the parent and the current "parent" as the "new node";
-    ///
-    /// This is the simple case. The algorithm also has a more complex case when to changes have a common ancestor,
-    /// which can actually be one of the changed nodes.
-    ///
-    /// To address this case at step 3, when we pop a new change to apply it, we actually aggregate all changes to the current
-    /// parent together. This is done by the heap because we also sort by node and it's range.
-    ///
-    pub fn commit(self) -> SyntaxNode<L> {
-        let BatchMutation { root, mut changes } = self;
+    pub fn commit_with_range(mut self) -> (SyntaxNode<L>, TextRange, TextEdit) {
+        let BatchMutation { root, mut changes, .. } = self;
+        let mut range = None;
+
         // Fill the heap with the requested changes
 
         while let Some(item) = changes.pop() {
             // If parent is None, we reached the root
             if let Some(current_parent) = item.parent {
+                if item.is_main {
+                    range = match range {
+                        None => Some(current_parent.text_range()),
+                        Some(range) => Some(range.cover(current_parent.text_range())),
+                    };
+                }
                 // This must be done before the detachment below
                 // because we need nodes that are still valid in the old tree
 
@@ -402,7 +414,7 @@ where
                     let index = index.checked_sub(removed_slots)
                         .unwrap_or_else(|| panic!("cannot replace element in slot {index} with {removed_slots} removed slots"));
 
-                    current_parent = if is_list && replace_with.is_none() {
+                    let new_current_parent = if is_list && replace_with.is_none() {
                         removed_slots += 1;
                         current_parent.clone().splice_slots(index..=index, empty())
                     } else {
@@ -410,6 +422,14 @@ where
                             .clone()
                             .splice_slots(index..=index, once(replace_with))
                     };
+
+                    if item.is_main {
+                        let old = current_parent.to_string();
+                        let new = new_current_parent.to_string();
+
+                        TextEdit::from_diff(&mut self.text_edit_builder, &old, &new);
+                    }
+                    current_parent = new_current_parent;
                 }
 
                 changes.push(CommitChange {
@@ -418,19 +438,47 @@ where
                     parent_range: grandparent_range,
                     new_node_slot: current_parent_slot,
                     new_node: Some(SyntaxElement::Node(current_parent)),
+                    is_main: false,
                 });
             } else {
+                if item.is_main {
+                    range = match range {
+                        None => Some(root.text_range()),
+                        Some(range) => Some(range.cover(root.text_range())),
+                    };
+                }
+
                 let root = item
                     .new_node
                     .expect("new_node")
                     .into_node()
                     .expect("expected root to be a node and not a token");
 
-                return root;
+                return (root, range.unwrap(), self.text_edit_builder.finish());
             }
         }
 
-        root
+        (root, range.unwrap(), self.text_edit_builder.finish())
+    }
+
+    /// The core of the batch mutation algorithm can be summarized as:
+    /// 1 - Iterate all requested changes;
+    /// 2 - Insert them into a heap (priority queue) by depth. Deeper changes are done first;
+    /// 3 - Loop popping requested changes from the heap, taking the deepest change we have for the moment;
+    /// 4 - Each requested change has a "parent", an "index" and the "new node" (or None);
+    /// 5 - Clone the current parent's "parent", the "grandparent";
+    /// 6 - Detach the current "parent" from the tree;
+    /// 7 - Replace the old node at "index" at the current "parent" with the current "new node";
+    /// 8 - Insert into the heap the grandparent as the parent and the current "parent" as the "new node";
+    ///
+    /// This is the simple case. The algorithm also has a more complex case when to changes have a common ancestor,
+    /// which can actually be one of the changed nodes.
+    ///
+    /// To address this case at step 3, when we pop a new change to apply it, we actually aggregate all changes to the current
+    /// parent together. This is done by the heap because we also sort by node and it's range.
+    ///
+    pub fn commit(mut self) -> SyntaxNode<L> {
+        self.commit_with_range().0
     }
 
     pub fn root(&self) -> &SyntaxNode<L> {
