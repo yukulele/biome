@@ -91,11 +91,11 @@ pub enum BiomeCommand {
         #[bpaf(long("fix"), switch, hide_usage)]
         fix: bool,
 
-        /// Alias for `--write`, writes safe fixes, formatting and import sorting
+        /// Alias for `--write`, writes safe fixes, formatting and import sorting (deprecated, use `--write`)
         #[bpaf(long("apply"), switch, hide_usage)]
         apply: bool,
 
-        /// Alias for `--write --unsafe`, writes safe and unsafe fixes, formatting and import sorting
+        /// Alias for `--write --unsafe`, writes safe and unsafe fixes, formatting and import sorting (deprecated, use `--write --unsafe`)
         #[bpaf(long("apply-unsafe"), switch, hide_usage)]
         apply_unsafe: bool,
 
@@ -164,11 +164,11 @@ pub enum BiomeCommand {
         #[bpaf(long("fix"), switch, hide_usage)]
         fix: bool,
 
-        /// Alias for `--write`, writes safe fixes
+        /// Alias for `--write`, writes safe fixes, (deprecated, use `--write`)
         #[bpaf(long("apply"), switch, hide_usage)]
         apply: bool,
 
-        /// Alias for `--write --unsafe`, writes safe and unsafe fixes
+        /// Alias for `--write --unsafe`, writes safe and unsafe fixes, (deprecated, use `--write --unsafe`)
         #[bpaf(long("apply-unsafe"), switch, hide_usage)]
         apply_unsafe: bool,
 
