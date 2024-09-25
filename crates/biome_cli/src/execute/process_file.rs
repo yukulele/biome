@@ -141,6 +141,8 @@ pub(crate) fn process_file(ctx: &TraversalOptions, biome_path: &BiomePath) -> Fi
                 DiagnosticTags::VERBOSE,
             )?;
 
+        dbg!(":cuyrrent pag", &biome_path);
+
         // first we stop if there are some files that don't have ALL features enabled, e.g. images, fonts, etc.
         if file_features.is_ignored() || file_features.is_not_enabled() {
             return Ok(FileStatus::Ignored);
